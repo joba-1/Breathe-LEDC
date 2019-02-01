@@ -57,7 +57,7 @@ void handle_ledc( void *arg ) {
   // -> esp_intr_alloc_intrstatus(source=ETS_LEDC_INTR_SOURCE, flags, ...) = ESP_ERR_NOT_FOUND
   // -> get_available_int(flags, cpu=xPortGetCoreID(), force=-1, source=ETS_LEDC_INTR_SOURCE) = -1
 
-  ESP_ERROR_CHECK( ledc_isr_register(toggle_fade_isr, &ledc_channel, 0, NULL) );
+  // ESP_ERROR_CHECK( ledc_isr_register(toggle_fade_isr, &ledc_channel, 0, NULL) );
 
   // Start fading
   evt_queue = xQueueCreate(1, sizeof(uint32_t)); // never more than one event
@@ -79,6 +79,6 @@ void app_main()
 {
   printf("Hello Breathe LEDC!\n");
   // Test pinning to core 0 because no irq on core 1 (does not help...):
-  xTaskCreatePinnedToCore(handle_ledc, "ledc_task", configMINIMAL_STACK_SIZE, NULL, 4, NULL, 0);
+  xTaskCreatePinnedToCore(handle_ledc, "ledc_task", 4*configMINIMAL_STACK_SIZE, NULL, 4, NULL, 0);
 }
 
