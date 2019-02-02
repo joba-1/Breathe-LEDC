@@ -6,18 +6,17 @@
 
 #include <stdio.h>                   // printf()
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"           // for timing
+#include "freertos/task.h"           // for task and timing
 #include "driver/ledc.h"             // for ledc led fading api
 
 #define LED_PIN   27
 #define CHANNEL   LEDC_CHANNEL_0
 #define MODE      LEDC_HIGH_SPEED_MODE
+#define TIMER     LEDC_TIMER_0
 #define FADE_MS   4000
 #define DUTY_BITS 12
 
 #define MAX_DUTY  (1<<DUTY_BITS)
-
-bool fade_inverted = true;           // direction of last fade
 
 void ledc_init() {
   // Setup timer and channel similar to ledc_example_main.c
@@ -25,7 +24,7 @@ void ledc_init() {
     .duty_resolution = DUTY_BITS,    // resolution of pwm duty
     .freq_hz         = 5000,         // frequency of pwm signal
     .speed_mode      = MODE,         // timer mode
-    .timer_num       = LEDC_TIMER_0  // timer index
+    .timer_num       = TIMER         // timer index
   };
 
   // Set configuration of timer0 for high speed channels
@@ -38,7 +37,7 @@ void ledc_init() {
     .gpio_num   = LED_PIN,
     .speed_mode = MODE,
     .hpoint     = 0,
-    .timer_sel  = LEDC_TIMER_0
+    .timer_sel  = TIMER
   };
 
   // Set configuration of LEDC channel
@@ -48,7 +47,7 @@ void ledc_init() {
   ESP_ERROR_CHECK( ledc_fade_func_install(0) );
 }
 
-void timing( bool inverted ) {
+void show_timing( bool inverted ) {
   static TickType_t started = 0;
   TickType_t now = xTaskGetTickCount();
   printf("%u ms: fading %s\n", (now-started)*portTICK_PERIOD_MS, inverted ? "out" : "in");
@@ -56,9 +55,11 @@ void timing( bool inverted ) {
 }
 
 void ledc_fade() {
+  static bool fade_inverted = true;  // direction of last fade
+
   for(;;) {
     fade_inverted = !fade_inverted;
-    timing(fade_inverted);
+    show_timing(fade_inverted);
     ESP_ERROR_CHECK( ledc_set_fade_with_time(MODE, CHANNEL, fade_inverted ? 0 : MAX_DUTY, FADE_MS) );
     ESP_ERROR_CHECK( ledc_fade_start(MODE, CHANNEL, LEDC_FADE_WAIT_DONE) );
   }
