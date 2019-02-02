@@ -1,6 +1,6 @@
 # Breathe LEDC Example
 
-Me trying to make an esp32 breathe a led with LEDC api using interrupts.
+Me trying to make an esp32 breathe a led with LEDC api and background task.
 
 ## Build - Flash - Monitor
 * Prepare shell to use ESP-IDF (see my [Blink-ULP repo](https://github.com/joba-1/Blink-ULP/blob/master/README.md) for details)
