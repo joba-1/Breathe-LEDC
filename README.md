@@ -1,7 +1,5 @@
 # Breathe LEDC Example
 
-HELP NEEDED: does not work yet, how to use ledc_isr_register()?
-
 Me trying to make an esp32 breathe a led with LEDC api using interrupts.
 
 ## Build - Flash - Monitor

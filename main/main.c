@@ -4,35 +4,40 @@
  * Setup LEDC so led fades in, calls interrupt to fade out and so on without further intervention.
  */
 
-#include <stdio.h>          // printf()
+#include <stdio.h>           // printf()
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"  // for xTask* stuff
-#include "freertos/queue.h" // for xQueue* stuff
-#include "driver/ledc.h"    // for ledc led fading (nothing to do with ulp)
+#include "freertos/semphr.h" // for xSemaphore* stuff (wating for fade end)
+#include "driver/ledc.h"     // for ledc led fading api
 
 
-static xQueueHandle evt_queue = NULL;
-static bool fade_inverted = false;
+#define FADE_MS    4000
+#define MAX_DUTY   4000
+#define TIMEOUT_MS 5000
+
+
+static SemaphoreHandle_t fading = NULL; // to wait for fade end
+static bool fade_inverted       = true; // direction of last fade
 
 
 // ISR routine for changing fade direction of LEDC demo
-static void IRAM_ATTR toggle_fade_isr( void *dummy ) {
-  xQueueSendFromISR(evt_queue, &fade_inverted, NULL);  
-  fade_inverted = !fade_inverted;
+static void IRAM_ATTR fade_ended_isr( void *dummy ) {
+  xSemaphoreGiveFromISR(fading, NULL);
 }
 
 
-// Handle LEDC in task (got wdt if logs enabled if not: didnt help)
-void handle_ledc( void *arg ) {
-  // setup timer and channel similar to ledc_example_main.c
+void app_main()
+{
+  printf("Hello Breathe LEDC!\n");
+
+  // Setup timer and channel similar to ledc_example_main.c
   ledc_timer_config_t ledc_timer = {
-    .duty_resolution = LEDC_TIMER_13_BIT,    // resolution of pwm duty
+    .duty_resolution = LEDC_TIMER_12_BIT,    // resolution of pwm duty 0..4095
     .freq_hz         = 5000,                 // frequency of pwm signal
     .speed_mode      = LEDC_HIGH_SPEED_MODE, // timer mode
     .timer_num       = LEDC_TIMER_0          // timer index
   };
 
-  // set configuration of timer0 for high speed channels
+  // Set configuration of timer0 for high speed channels
   ledc_timer_config(&ledc_timer);
 
   // Prepare individual configuration for a channel of the LED Controller 
@@ -42,43 +47,32 @@ void handle_ledc( void *arg ) {
     .gpio_num   = 27,
     .speed_mode = LEDC_HIGH_SPEED_MODE,
     .hpoint     = 0,
-    .timer_sel  = LEDC_TIMER_0,
-    .intr_type  = LEDC_INTR_FADE_END // not in ledc_example_main.c, but I guess is required
+    .timer_sel  = LEDC_TIMER_0
   };
+
+  // Set configuration of LEDC channel
   ESP_ERROR_CHECK( ledc_channel_config(&ledc_channel) );
 
-  // Initialize fade service.
-  ESP_ERROR_CHECK( ledc_fade_func_install(0) );
+  // Initialize fade service (need to share or ledc_isr_register() below will fail).
+  ESP_ERROR_CHECK( ledc_fade_func_install(ESP_INTR_FLAG_IRAM|ESP_INTR_FLAG_SHARED) );
 
-  // Set ISR routine to change fade direction -> aborts with ESP_ERR_NOT_FOUND!? 
-  // Read the sources: only parameter flags can induce this error message:
-  // ledc_isr_register(.., flags, ...) tried all permutations with ESP_INTR_FLAG_IRAM and ESP_INTR_FLAG_SHARED
-  // -> esp_intr_alloc(source=ETS_LEDC_INTR_SOURCE, flags, ...)
-  // -> esp_intr_alloc_intrstatus(source=ETS_LEDC_INTR_SOURCE, flags, ...) = ESP_ERR_NOT_FOUND
-  // -> get_available_int(flags, cpu=xPortGetCoreID(), force=-1, source=ETS_LEDC_INTR_SOURCE) = -1
+  // Set ISR routine to change fade direction 
+  ESP_ERROR_CHECK( ledc_isr_register(fade_ended_isr, &ledc_channel, ESP_INTR_FLAG_IRAM|ESP_INTR_FLAG_SHARED, NULL) );
 
-  // ESP_ERROR_CHECK( ledc_isr_register(toggle_fade_isr, &ledc_channel, 0, NULL) );
+  // Taken initially and while fade is ongoing
+  fading = xSemaphoreCreateBinary();
 
-  // Start fading
-  evt_queue = xQueueCreate(1, sizeof(uint32_t)); // never more than one event
-  xQueueSend(evt_queue, &fade_inverted, 0);  
-  printf("Started LEDC\n");
+  printf("Start LEDC Breathing\n");
+  xSemaphoreGive(fading);
 
-  bool inverted;
   for(;;) {
-    if( xQueueReceive(evt_queue, &inverted, portMAX_DELAY)) {
-      printf("Fade %s\n", inverted ? "out" : "in");
-      ESP_ERROR_CHECK( ledc_set_fade_with_time(ledc_channel.speed_mode, ledc_channel.channel, inverted ? 0 : 4000, 3000) );
-      ESP_ERROR_CHECK( ledc_fade_start(ledc_channel.speed_mode, ledc_channel.channel, LEDC_FADE_NO_WAIT) );
+    if( !xSemaphoreTake(fading, TIMEOUT_MS/portTICK_PERIOD_MS) ) {
+      printf("Fade did not end in %us. Forcing now\n", TIMEOUT_MS/1000);
+      xSemaphoreGive(fading); // Necessary? Or is it given after the timeout anyways?
     }
+    fade_inverted = !fade_inverted;
+    ESP_ERROR_CHECK( ledc_set_fade_with_time(ledc_channel.speed_mode, ledc_channel.channel, fade_inverted ? 0 : MAX_DUTY, FADE_MS) );
+    ESP_ERROR_CHECK( ledc_fade_start(ledc_channel.speed_mode, ledc_channel.channel, LEDC_FADE_NO_WAIT) );
   }
-}
-
-
-void app_main()
-{
-  printf("Hello Breathe LEDC!\n");
-  // Test pinning to core 0 because no irq on core 1 (does not help...):
-  xTaskCreatePinnedToCore(handle_ledc, "ledc_task", 4*configMINIMAL_STACK_SIZE, NULL, 4, NULL, 0);
 }
 
